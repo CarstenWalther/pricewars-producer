@@ -3,6 +3,9 @@ var appRouter = function(app) {
     var Products = require("../models/Products.js");
     var KafkaLogger = require("../logging/KafkaLogger.js");
 
+    var orderCounter = 0
+    var openOrders = {}
+
     app
         .get("/products", function(req, res) {
             // console.log("GET Products called");
@@ -94,8 +97,8 @@ var appRouter = function(app) {
                 });
             }
 
-            var merchant_token = req.header("authorization").split(" ");
-            if (merchant_token.length != 2 || merchant_token[0] != "Token") {
+            var auth_header_contents = req.header("authorization").split(" ");
+            if (auth_header_contents.length != 2 || auth_header_contents[0] != "Token") {
                 return res.status(400).send({
                     "code": 400,
                     "message": "missing or unacceptable merchant_token",
@@ -103,7 +106,8 @@ var appRouter = function(app) {
                 });
             }
 
-            var merchant_hash = KafkaLogger.hashToken(merchant_token[1]);
+            const merchant_token = auth_header_contents[1];
+            var merchant_hash = KafkaLogger.hashToken(merchant_token);
             var amount = parseInt(req.body.amount);
 
             if (isNaN(amount)) {
@@ -143,8 +147,25 @@ var appRouter = function(app) {
                 }
             };
 
+            openOrders[orderCounter++] = order
+
             KafkaLogger.LogBuy(product, order, merchant_hash, timeOfBuy);
             return res.status(200).send(order);
+        })
+        .post("/orders/:id", function(req, res) {
+            id = parseInt(req.params.id)
+
+            //todo: check token
+            if (!(id in openOrders)) {
+                return res.status(400).send({
+                    "code": 400,
+                    "message": "wrong order id or merchant_token",
+                });
+            }
+            //todo: check time
+            order = openOrders[id]
+            delete openOrders[id]
+            return res.status(200).send(order)
         })
         .get("/decryption_key", function(req, res) {
             // todo for later: add check for permission
