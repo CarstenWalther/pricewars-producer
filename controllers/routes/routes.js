@@ -3,8 +3,9 @@ var appRouter = function(app) {
     var Products = require("../models/Products.js");
     var KafkaLogger = require("../logging/KafkaLogger.js");
 
-    var orderCounter = 0
+    var orderIdCounter = 0
     var openOrders = {}
+    var openProducts = {}
 
     app
         .get("/products", function(req, res) {
@@ -130,6 +131,7 @@ var appRouter = function(app) {
             Products.AddEncryption(merchant_hash, product, timeOfBuy);
             
             const order = {
+                "id": orderIdCounter++,
                 "billing_amount": product.price * product.amount + product.fixed_order_cost,
                 "fixed_cost": product.fixed_order_cost,
                 "unit_price": product.price,
@@ -147,9 +149,8 @@ var appRouter = function(app) {
                 }
             };
 
-            openOrders[orderCounter++] = order
-
-            KafkaLogger.LogBuy(product, order, merchant_hash, timeOfBuy);
+            openOrders[order.id] = order
+            openProducts[order.id] = product
             return res.status(200).send(order);
         })
         .post("/orders/:id", function(req, res) {
@@ -162,9 +163,18 @@ var appRouter = function(app) {
                     "message": "wrong order id or merchant_token",
                 });
             }
+            
+            var auth_header_contents = req.header("authorization").split(" ");
+            const merchant_token = auth_header_contents[1];
+            var merchant_hash = KafkaLogger.hashToken(merchant_token);
+            var timeOfBuy = (new Date()).toISOString();
+
             //todo: check time
             order = openOrders[id]
+            product = openProducts[id]
             delete openOrders[id]
+            delete openProducts[id]
+            KafkaLogger.LogBuy(product, order, merchant_hash, timeOfBuy);
             return res.status(200).send(order)
         })
         .get("/decryption_key", function(req, res) {
